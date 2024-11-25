@@ -61,6 +61,9 @@ class Zombie:
     def update(self):
         self.frame = (self.frame + FRAMES_PER_ACTION * ACTION_PER_TIME * game_framework.frame_time) % FRAMES_PER_ACTION
 
+        self.x = clamp(50, self.x, 1220)
+        self.y = clamp(50, self.y, 974)
+
         # fill here
         self.bt.run()
 
