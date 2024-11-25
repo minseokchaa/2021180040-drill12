@@ -1,3 +1,5 @@
+from xml.sax.saxutils import escape
+
 from pico2d import *
 
 import random
@@ -70,7 +72,7 @@ class Zombie:
         self.font.draw(self.x - 10, self.y + 60, f'{self.ball_count}', (0, 0, 255))
         draw_rectangle(*self.get_bb())
 
-        Zombie.marker_image.draw(self.tx, self.ty)
+        # Zombie.marker_image.draw(self.tx, self.ty)
 
 
     def handle_event(self, event):
@@ -94,8 +96,23 @@ class Zombie:
 
         pass
 
+    def distance_more_than(self, x1, y1, x2, y2, r):
+        distance2 = (x1 - x2) ** 2 + (y1 - y2) ** 2
+        return distance2 > (PIXEL_PER_METER * r) ** 2
+
+        pass
+
     def move_slightly_to(self, tx, ty):
         self.dir = math.atan2(ty - self.y, tx - self.x)
+        distance = RUN_SPEED_PPS * game_framework.frame_time
+        self.x += distance * math.cos(self.dir)
+        self.y += distance * math.sin(self.dir)
+
+        pass
+
+    def move_slightly_from(self, tx, ty):
+        self.dir = math.atan2(ty - self.y, tx - self.x)
+        self.dir += math.pi  # 반대 방향으로 이동 (180도 추가)
         distance = RUN_SPEED_PPS * game_framework.frame_time
         self.x += distance * math.cos(self.dir)
         self.y += distance * math.sin(self.dir)
@@ -121,6 +138,24 @@ class Zombie:
             self.state = 'Idle'
             return BehaviorTree.FAIL
 
+    def is_mine_more_then_boy(self, mine_func, boys_func):
+        mine = mine_func()
+        boys = boys_func()
+
+        if mine >= boys:
+            print(f"Mine: {mine}, Boys: {boys}")  # 디버깅용 출력
+            return BehaviorTree.SUCCESS
+        else:
+            return BehaviorTree.FAIL
+
+    def is_mine_less_then_boy(self, mine_func, boys_func):
+        mine = mine_func()
+        boys = boys_func()
+        if mine < boys:
+            return BehaviorTree.SUCCESS
+        else:
+            return BehaviorTree.FAIL
+
     def move_to_boy(self, r=0.5):
         self.state = 'Walk'
         self.move_slightly_to(play_mode.boy.x, play_mode.boy.y)
@@ -129,29 +164,44 @@ class Zombie:
         else:
             return BehaviorTree.RUNNING
 
-    def get_patrol_location(self):
-        self.tx, self.ty = self.patrol_locations[self.loc_no]
-        self.loc_no = (self.loc_no+1) % len(self.patrol_locations)
-        return BehaviorTree.SUCCESS
+    def move_from_boy(self, r=0.5):
+        self.state = 'Walk'
+        self.move_slightly_from(play_mode.boy.x, play_mode.boy.y)
+        if self.distance_more_than(play_mode.boy.x, play_mode.boy.y, self.x, self.y, r):
+            return BehaviorTree.SUCCESS
+        else:
+            return BehaviorTree.RUNNING
+
+
 
     def build_behavior_tree(self):
-        a1 = Action('Set target location', self.set_target_location, 1000, 1000)
 
         a2 = Action('이동하기', self.move_to)
 
-        root = move_to_target_location = Sequence('Move to target location', a1, a2)
-
         a3 = Action('랜덤 위치 설정', self.set_random_location)
-        root = wander = Sequence('Wander', a3, a2)
+
+
+        #--------------------------------------------------------------------
 
         c1 = Condition('소년이 근처에 있는가?', self.is_boy_nearby, 7)
-        a4 = Action('소년한테 접근', self.move_to_boy)
-        root = chase_boy = Sequence('소년을 추적', c1, a4)
 
-        root = chase_or_flee = Selector('추적 또는 배회', chase_boy, wander)
+        c2 = Condition('나의 공의 수는 소년의 공의 수의 이상인가?', self.is_mine_more_then_boy, lambda:self.ball_count, lambda:play_mode.boy.ball_count)
 
-        a5 = Action('순찰 위치 가져오기', self.get_patrol_location)
-        root = patrol = Sequence('순찰', a5, a2)
+        c3 = Condition('나의 공의 수는 소년의 공의 수의 미만인가?', self.is_mine_less_then_boy, lambda:self.ball_count, lambda:play_mode.boy.ball_count)
+
+        a4 = Action('소년 따라가기', self.move_to_boy)
+
+        a5 = Action('소년으로부터 도망가기', self.move_from_boy)
+
+        #---------------------------------------------------------------------
+
+        wander = Sequence('배회', a3, a2)
+
+        chase_boy = Sequence('추적', c1, c2, a4)
+
+        escape_boy = Sequence('도망', c1, c3, a5)
+
+        root = chase_or_escape_or_flee = Selector('추적 또는 도망 또는 배회',chase_boy, escape_boy, wander)
 
         self.bt = BehaviorTree(root)
 
